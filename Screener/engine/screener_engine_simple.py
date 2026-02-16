@@ -118,9 +118,12 @@ def get_simple_fundamentals(ticker):
         except:
             pass
 
+        pe_raw = info.get('trailingPE', None)
+        fpe_raw = info.get('forwardPE', None)
+
         return {
-            'pe_ratio': info.get('trailingPE', None),
-            'forward_pe': info.get('forwardPE', None),
+            'pe_ratio': float(pe_raw) if pe_raw is not None else None,
+            'forward_pe': float(fpe_raw) if fpe_raw is not None else None,
             'sector': info.get('sector', 'Unknown'),
             'avg_volume': info.get('averageVolume', None),
             'earnings_date': earnings_date,
@@ -254,9 +257,28 @@ def analyze_stock(ticker, days_to_simulate=90, num_simulations=10000, historical
             recent_high = stock_price
             drop_from_high_pct = 0.0
 
+        # Volume surge ratio (recent 5d avg vs 60d avg)
+        try:
+            vol_data = stock_data['Volume'].dropna()
+            vol_5d = float(vol_data.iloc[-5:].mean())
+            vol_60d = float(vol_data.iloc[-60:].mean())
+            volume_surge = vol_5d / vol_60d if vol_60d > 0 else 1.0
+        except:
+            volume_surge = None
+
+        # Earnings exclusion flag (is earnings inside the trade window?)
+        days_to_earn = fundamentals['days_to_earnings']
+        if days_to_earn is not None and 0 <= days_to_earn <= days_to_simulate:
+            earnings_in_window = True
+        else:
+            earnings_in_window = False
+
         # Strike prices at key percentiles
         strike_p5 = stock_price * (1 + p5 / 100)
         strike_p10 = stock_price * (1 + p10 / 100)
+
+        # Suggested spread width (gap between p5 and p10 strikes)
+        spread_width = round(abs(strike_p10 - strike_p5), 2)
 
         # Regime classification
         rss = risk_state['risk_state_score']
@@ -284,6 +306,7 @@ def analyze_stock(ticker, days_to_simulate=90, num_simulations=10000, historical
             # Strike prices
             'strike_p5': strike_p5,
             'strike_p10': strike_p10,
+            'spread_width': spread_width,
 
             # Risk metrics
             'var_95': cvar['var_95'],
@@ -297,13 +320,19 @@ def analyze_stock(ticker, days_to_simulate=90, num_simulations=10000, historical
             'vol_regime_ratio': risk_state['vol_ratio'],
             'tail_thickness': risk_state['tail_ratio'],
 
+            # Volume context
+            'volume_surge': volume_surge,
+
+            # Earnings
+            'earnings_in_window': earnings_in_window,
+            'days_to_earnings': fundamentals['days_to_earnings'],
+            'earnings_date': fundamentals['earnings_date'],
+
             # Valuation
             'pe_ratio': fundamentals['pe_ratio'],
             'forward_pe': fundamentals['forward_pe'],
             'sector': fundamentals['sector'],
             'avg_volume': fundamentals['avg_volume'],
-            'earnings_date': fundamentals['earnings_date'],
-            'days_to_earnings': fundamentals['days_to_earnings'],
 
             # Z-score
             'z_score': z_score,
