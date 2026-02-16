@@ -1,0 +1,5 @@
+{
+    "python.analysis.extraPaths": [
+        "./Screener/engine/Mc Engine"
+    ]
+}
