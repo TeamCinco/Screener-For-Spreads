@@ -96,28 +96,68 @@ def calculate_risk_state(stock_data, final_returns, cvar):
 # ============================================================================
 
 def get_simple_fundamentals(ticker):
-    """Get basic valuation metrics"""
+    """Get valuation, earnings, dividend, sector/industry"""
+    from datetime import datetime
+
     try:
         stock = yf.Ticker(ticker)
         info = stock.info
 
+        # --- Earnings date ---
         earnings_date = None
         days_to_earnings = None
         try:
-            calendar = stock.calendar
-            if calendar is not None and 'Earnings Date' in calendar.index:
-                earnings_date = calendar.loc['Earnings Date'][0]
-                from datetime import datetime
-                if pd.notna(earnings_date):
-                    today = datetime.now()
+            cal = stock.calendar
+            if cal is not None:
+                # yfinance returns dict in newer versions, DataFrame in older
+                if isinstance(cal, dict):
+                    # Try common key names
+                    for key in ['Earnings Date', 'earningsDate', 'Earnings Dates']:
+                        if key in cal:
+                            val = cal[key]
+                            # Can be a list of dates or a single date
+                            if isinstance(val, list) and len(val) > 0:
+                                earnings_date = val[0]
+                            else:
+                                earnings_date = val
+                            break
+                elif isinstance(cal, pd.DataFrame):
+                    if 'Earnings Date' in cal.columns:
+                        earnings_date = cal['Earnings Date'].iloc[0]
+                    elif 'Earnings Date' in getattr(cal, 'index', []):
+                        earnings_date = cal.loc['Earnings Date'].iloc[0]
+
+                if earnings_date is not None and pd.notna(earnings_date):
                     if isinstance(earnings_date, str):
-                        earnings_dt = pd.to_datetime(earnings_date)
-                    else:
-                        earnings_dt = earnings_date
-                    days_to_earnings = (earnings_dt - today).days
+                        earnings_date = pd.to_datetime(earnings_date)
+                    days_to_earnings = (earnings_date - datetime.now()).days
         except:
             pass
 
+        # Fallback: try info dict for earnings date
+        if earnings_date is None:
+            for key in ['earningsTimestamp', 'mostRecentQuarter']:
+                ts = info.get(key)
+                if ts is not None:
+                    try:
+                        earnings_date = datetime.fromtimestamp(ts)
+                        days_to_earnings = (earnings_date - datetime.now()).days
+                        break
+                    except:
+                        pass
+
+        # --- Dividend date ---
+        ex_dividend_date = None
+        days_to_dividend = None
+        try:
+            div_ts = info.get('exDividendDate')
+            if div_ts is not None:
+                ex_dividend_date = datetime.fromtimestamp(div_ts)
+                days_to_dividend = (ex_dividend_date - datetime.now()).days
+        except:
+            pass
+
+        # --- Valuation ---
         pe_raw = info.get('trailingPE', None)
         fpe_raw = info.get('forwardPE', None)
 
@@ -125,14 +165,20 @@ def get_simple_fundamentals(ticker):
             'pe_ratio': float(pe_raw) if pe_raw is not None else None,
             'forward_pe': float(fpe_raw) if fpe_raw is not None else None,
             'sector': info.get('sector', 'Unknown'),
+            'industry': info.get('industry', 'Unknown'),
             'avg_volume': info.get('averageVolume', None),
             'earnings_date': earnings_date,
             'days_to_earnings': days_to_earnings,
+            'ex_dividend_date': ex_dividend_date,
+            'days_to_dividend': days_to_dividend,
         }
     except:
         return {
-            'pe_ratio': None, 'forward_pe': None, 'sector': 'Unknown',
-            'avg_volume': None, 'earnings_date': None, 'days_to_earnings': None,
+            'pe_ratio': None, 'forward_pe': None,
+            'sector': 'Unknown', 'industry': 'Unknown',
+            'avg_volume': None, 'earnings_date': None,
+            'days_to_earnings': None, 'ex_dividend_date': None,
+            'days_to_dividend': None,
         }
 
 
@@ -220,6 +266,11 @@ def analyze_stock(ticker, days_to_simulate=90, num_simulations=10000, historical
         volatility = float(stock_returns.std() * np.sqrt(252))
         mu = 0.042  # risk-free proxy
 
+        # Downside semi-variance
+        down_returns = stock_returns[stock_returns < 0]
+        downside_vol = float(down_returns.std() * np.sqrt(252)) if len(down_returns) > 10 else volatility
+        vol_skew_ratio = downside_vol / volatility if volatility > 0 else 1.0
+
         # Run lean MC (base case only)
         np.random.seed(42)
         final_prices, final_returns = run_lean_simulation(
@@ -266,8 +317,14 @@ def analyze_stock(ticker, days_to_simulate=90, num_simulations=10000, historical
         except:
             volume_surge = None
 
-        # Earnings exclusion flag (is earnings inside the trade window?)
+        # Earnings proximity flag (within 20 days?)
         days_to_earn = fundamentals['days_to_earnings']
+        if days_to_earn is not None and 0 <= days_to_earn <= 20:
+            earnings_soon = True
+        else:
+            earnings_soon = False
+
+        # Earnings inside trade window
         if days_to_earn is not None and 0 <= days_to_earn <= days_to_simulate:
             earnings_in_window = True
         else:
@@ -295,6 +352,8 @@ def analyze_stock(ticker, days_to_simulate=90, num_simulations=10000, historical
             'recent_high': recent_high,
             'drop_from_high_pct': drop_from_high_pct,
             'volatility': volatility * 100,
+            'downside_vol': downside_vol * 100,
+            'vol_skew_ratio': vol_skew_ratio,
 
             # Percentiles
             'p1': p1,
@@ -324,14 +383,20 @@ def analyze_stock(ticker, days_to_simulate=90, num_simulations=10000, historical
             'volume_surge': volume_surge,
 
             # Earnings
+            'earnings_soon': earnings_soon,
             'earnings_in_window': earnings_in_window,
             'days_to_earnings': fundamentals['days_to_earnings'],
             'earnings_date': fundamentals['earnings_date'],
+
+            # Dividend
+            'ex_dividend_date': fundamentals['ex_dividend_date'],
+            'days_to_dividend': fundamentals['days_to_dividend'],
 
             # Valuation
             'pe_ratio': fundamentals['pe_ratio'],
             'forward_pe': fundamentals['forward_pe'],
             'sector': fundamentals['sector'],
+            'industry': fundamentals['industry'],
             'avg_volume': fundamentals['avg_volume'],
 
             # Z-score

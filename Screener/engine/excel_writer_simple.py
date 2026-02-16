@@ -1,4 +1,4 @@
-"""Excel output - includes risk state, CVaR, strike prices"""
+"""Excel output - includes risk state, CVaR, strike prices, industry context"""
 import pandas as pd
 from pathlib import Path
 
@@ -15,20 +15,40 @@ def write_results_to_excel(results, output_path):
         print("No successful results to save")
         return
 
+    # --- Compute sector/industry oversold counts ---
+    # How many oversold names in the same sector and industry
+    oversold_mask = df['signal'] == 'OVERSOLD'
+
+    if 'sector' in df.columns:
+        sector_oversold = df[oversold_mask].groupby('sector')['ticker'].transform('count')
+        df['sector_oversold_count'] = 0
+        df.loc[oversold_mask, 'sector_oversold_count'] = sector_oversold.astype(int)
+        # For non-oversold stocks, show how many oversold in their sector
+        sector_counts = df[oversold_mask].groupby('sector')['ticker'].count().to_dict()
+        df['sector_oversold_count'] = df['sector'].map(sector_counts).fillna(0).astype(int)
+
+    if 'industry' in df.columns:
+        industry_counts = df[oversold_mask].groupby('industry')['ticker'].count().to_dict()
+        df['industry_oversold_count'] = df['industry'].map(industry_counts).fillna(0).astype(int)
+
     # Sort by Z-score (most oversold first)
     df = df.sort_values('z_score')
 
-    # Column order for easy scanning
+    # Column order
     column_order = [
         # Identity
         'ticker',
         'signal',
         'sector',
+        'industry',
 
-        # Earnings safety
+        # Earnings & dividend proximity
+        'earnings_soon',
         'earnings_in_window',
         'days_to_earnings',
         'earnings_date',
+        'ex_dividend_date',
+        'days_to_dividend',
 
         # Statistical dislocation
         'z_score',
@@ -36,6 +56,10 @@ def write_results_to_excel(results, output_path):
 
         # Volume context
         'volume_surge',
+
+        # Industry relative strength
+        'sector_oversold_count',
+        'industry_oversold_count',
 
         # Risk state
         'risk_state_score',
@@ -66,6 +90,8 @@ def write_results_to_excel(results, output_path):
         'var_99',
         'cvar_99',
         'volatility',
+        'downside_vol',
+        'vol_skew_ratio',
 
         # Valuation
         'pe_ratio',
@@ -76,43 +102,33 @@ def write_results_to_excel(results, output_path):
     ]
 
     available_cols = [col for col in column_order if col in df.columns]
-    df = df[available_cols]
+    df_out = df[available_cols]
 
     with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
         # All results
-        df.to_excel(writer, index=False, sheet_name='All Results')
+        df_out.to_excel(writer, index=False, sheet_name='All Results')
 
         # Oversold (Z < -2)
-        oversold = df[df['signal'] == 'OVERSOLD'].copy()
+        oversold = df_out[df_out['signal'] == 'OVERSOLD'].copy()
         if len(oversold) > 0:
             oversold.to_excel(writer, index=False, sheet_name='Oversold')
 
-        # Oversold + no earnings in trade window
-        if 'earnings_in_window' in df.columns:
-            safe_oversold = df[
-                (df['signal'] == 'OVERSOLD') &
-                (df['earnings_in_window'] == False)
-            ].copy()
-            if len(safe_oversold) > 0:
-                safe_oversold.to_excel(writer, index=False, sheet_name='Oversold No Earnings')
-
         # Overbought (Z > 2)
-        overbought = df[df['signal'] == 'OVERBOUGHT'].copy()
+        overbought = df_out[df_out['signal'] == 'OVERBOUGHT'].copy()
         if len(overbought) > 0:
             overbought.to_excel(writer, index=False, sheet_name='Overbought')
 
         # Elevated regime (risk state > 65)
         if 'risk_state_score' in df.columns:
-            elevated = df[df['regime'] == 'Elevated'].copy()
+            elevated = df_out[df_out['regime'] == 'Elevated'].copy()
             if len(elevated) > 0:
                 elevated.to_excel(writer, index=False, sheet_name='Elevated Regime')
 
-    n_safe = len(safe_oversold) if 'earnings_in_window' in df.columns and len(df[df['signal'] == 'OVERSOLD']) > 0 else 0
-
     print(f"\nResults saved to: {output_path}")
-    print(f"  Total results: {len(df)}")
-    print(f"  Oversold: {len(df[df['signal'] == 'OVERSOLD'])}")
-    print(f"  Oversold (no earnings): {n_safe}")
-    print(f"  Overbought: {len(df[df['signal'] == 'OVERBOUGHT'])}")
+    print(f"  Total results: {len(df_out)}")
+    print(f"  Oversold: {len(df_out[df_out['signal'] == 'OVERSOLD'])}")
+    print(f"  Overbought: {len(df_out[df_out['signal'] == 'OVERBOUGHT'])}")
     if 'regime' in df.columns:
-        print(f"  Elevated regime: {len(df[df['regime'] == 'Elevated'])}")
+        print(f"  Elevated regime: {len(df_out[df_out['regime'] == 'Elevated'])}")
+    if 'earnings_soon' in df.columns:
+        print(f"  Earnings within 20d: {df['earnings_soon'].sum()}")

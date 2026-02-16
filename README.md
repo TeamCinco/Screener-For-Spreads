@@ -36,7 +36,6 @@ Reads the Excel output from stage 2 and scores each stock on a composite of Z-sc
 
 The screener engine imports the Monte Carlo Risk Engine from the Tail End Risk project. It uses the same simulation model: Student-t distributed shocks, EWMA conditional volatility, distributed jump process, risk-free drift proxy, and volatility stress ladder.
 
-**Total:** ~920 lines (excluding the shared MC engine)
 
 ---
 

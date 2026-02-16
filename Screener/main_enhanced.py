@@ -18,12 +18,12 @@ from engine.excel_writer_simple import write_results_to_excel  # Updated import
 # CONFIGURATION
 # ============================================================================
 
-TICKER_FILE = "/Users/jazzhashzzz/Documents/Market_Analysis_files/ticker_filtered.txt"
-OUTPUT_FILE = "/Users/jazzhashzzz/Documents/Market_Analysis_files/output/screener/screening_results_enhanced.xlsx"
+TICKER_FILE = "/Users/jazzhashzzz/Desktop/Screener For Spreads/ticker_filtered.txt"
+OUTPUT_FILE = "/Users/jazzhashzzz/Desktop/Screener For Spreads/output/screener"
 
 DAYS_TO_SIMULATE = 90
 NUM_SIMULATIONS = 10000
-HISTORICAL_WINDOW = 252*6
+HISTORICAL_WINDOW = 252
 
 # Global results list for signal handler
 RESULTS = []
