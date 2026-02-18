@@ -13,7 +13,7 @@ from openpyxl.utils import get_column_letter
 # CONFIGURATION
 # ============================================================================
 
-INPUT_FILE = "/Users/jazzhashzzz/Desktop/Screener For Spreads/output/screener_results_enhanced.xlsx"
+INPUT_FILE = "/Users/jazzhashzzz/Desktop/Screener For Spreads/output/screener_results.xlsx"
 OUTPUT_FILE = "/Users/jazzhashzzz/Desktop/Screener For Spreads/output/opportunities_ranked.xlsx"
 
 CRITERIA = {

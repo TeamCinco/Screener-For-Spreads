@@ -97,6 +97,13 @@ def write_results_to_excel(results, output_path):
 
         # Volume
         'avg_volume',
+
+        # Fundamentals growth
+        'revenue_yoy_%',
+        'revenue_cagr_%',
+        'current_ratio',
+        'cash_reserves'
+
     ]
 
     available_cols = [col for col in column_order if col in df.columns]
