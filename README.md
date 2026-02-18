@@ -1,9 +1,3 @@
-Perfect. Keep it simple, clean, and serious.
-
-Here’s a clear README you can drop directly into your repo:
-
----
-
 # Capital Deployment Framework
 
 Systematic stock screening + ETF regime identification engine.
@@ -114,6 +108,3 @@ It is a structured decision-support system.
 This project is for research and educational purposes only.
 It does not constitute financial advice.
 
----
-
-If you want, I can also give you a slightly more technical version tailored for recruiters.
