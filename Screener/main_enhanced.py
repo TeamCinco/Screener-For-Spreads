@@ -19,7 +19,7 @@ from engine.excel_writer_simple import write_results_to_excel  # Updated import
 # ============================================================================
 
 TICKER_FILE = "/Users/jazzhashzzz/Desktop/Screener For Spreads/ticker_filtered.txt"
-OUTPUT_FILE = "/Users/jazzhashzzz/Desktop/Screener For Spreads/output/screener"
+OUTPUT_FILE = "/Users/jazzhashzzz/Desktop/Screener For Spreads/output/screener_results_enhanced.xlsx"
 
 DAYS_TO_SIMULATE = 90
 NUM_SIMULATIONS = 10000
@@ -89,21 +89,17 @@ def main():
         if result['success']:
             RESULTS.append(result)
             
-            # Enhanced output with signal
-            signal_tag = f"[{result['signal']}]" if result['signal'] != 'NEUTRAL' else ""
-            z_score_str = f"Z={result['z_score']:.2f}" if result['z_score'] is not None else "Z=N/A"
-            pe_str = f"P/E={result['pe_ratio']:.1f}" if result['pe_ratio'] is not None else "P/E=N/A"
+            # Build compact status line
+            signal_tag = f"[{result['signal']}]" if result.get('signal', 'NEUTRAL') != 'NEUTRAL' else ""
+            z_str = f"Z={result['z_score']:.2f}" if result.get('z_score') is not None else "Z=N/A"
+            pe_str = f"P/E={result['pe_ratio']:.1f}" if result.get('pe_ratio') is not None else "P/E=N/A"
+            regime_str = result.get('regime', '')
+            drop_str = f"drop={result['drop_from_high_pct']:.1f}%"
             
-            # Add earnings warning if close
-            earnings_warning = ""
-            if result.get('days_to_earnings') is not None and result['days_to_earnings'] is not None:
-                days = result['days_to_earnings']
-                if 0 <= days <= 7:
-                    earnings_warning = f" ⚠️EARNINGS:{days}d"
-                elif -7 <= days < 0:
-                    earnings_warning = f" 📊REPORTED:{abs(days)}d ago"
+            # Earnings flag
+            earn_flag = " ⚠️EARNINGS SOON" if result.get('earnings_soon') else ""
             
-            print(f"✓ {signal_tag} {z_score_str}, {pe_str}, drop={result['drop_from_high_pct']:.1f}%{earnings_warning}")
+            print(f"✓ {signal_tag} {z_str}, {pe_str}, {drop_str}, {regime_str}{earn_flag}")
         else:
             print(f"✗ Failed")
         

@@ -96,89 +96,130 @@ def calculate_risk_state(stock_data, final_returns, cvar):
 # ============================================================================
 
 def get_simple_fundamentals(ticker):
-    """Get valuation, earnings, dividend, sector/industry"""
+    """Get valuation, earnings, dividend, sector/industry.
+    Uses multiple yfinance methods as fallbacks since info can be empty."""
     from datetime import datetime
 
     try:
         stock = yf.Ticker(ticker)
-        info = stock.info
+
+        # --- Try info dict first ---
+        try:
+            info = stock.info
+            if info is None or len(info) < 5:
+                info = {}
+        except:
+            info = {}
+
+        # --- Try fast_info as fallback for basic data ---
+        try:
+            fi = stock.fast_info
+        except:
+            fi = None
+
+        # --- Valuation ---
+        pe_raw = info.get('trailingPE') or info.get('trailingPe')
+        fpe_raw = info.get('forwardPE') or info.get('forwardPe')
+
+        # --- Sector / Industry ---
+        sector = info.get('sector') or info.get('sectorDisp') or 'Unknown'
+        industry = info.get('industry') or info.get('industryDisp') or 'Unknown'
+
+        # --- Volume ---
+        avg_volume = info.get('averageVolume') or info.get('averageDailyVolume10Day')
+        if avg_volume is None and fi is not None:
+            try:
+                avg_volume = fi.get('averageVolume', None)
+            except:
+                pass
 
         # --- Earnings date ---
         earnings_date = None
-        days_to_earnings = None
+
+        # Method 1: stock.calendar
         try:
             cal = stock.calendar
             if cal is not None:
-                # yfinance returns dict in newer versions, DataFrame in older
                 if isinstance(cal, dict):
-                    # Try common key names
-                    for key in ['Earnings Date', 'earningsDate', 'Earnings Dates']:
+                    for key in ['Earnings Date', 'Earnings Dates', 'earningsDate', 'earningsHigh', 'Earnings Average']:
                         if key in cal:
                             val = cal[key]
-                            # Can be a list of dates or a single date
                             if isinstance(val, list) and len(val) > 0:
                                 earnings_date = val[0]
-                            else:
+                            elif val is not None:
                                 earnings_date = val
                             break
                 elif isinstance(cal, pd.DataFrame):
-                    if 'Earnings Date' in cal.columns:
-                        earnings_date = cal['Earnings Date'].iloc[0]
-                    elif 'Earnings Date' in getattr(cal, 'index', []):
-                        earnings_date = cal.loc['Earnings Date'].iloc[0]
-
-                if earnings_date is not None and pd.notna(earnings_date):
-                    if isinstance(earnings_date, str):
-                        earnings_date = pd.to_datetime(earnings_date)
-                    days_to_earnings = (earnings_date - datetime.now()).days
+                    for col in cal.columns:
+                        if 'earning' in col.lower():
+                            earnings_date = cal[col].iloc[0]
+                            break
+                    if earnings_date is None and hasattr(cal, 'index'):
+                        for idx in cal.index:
+                            if 'earning' in str(idx).lower():
+                                earnings_date = cal.loc[idx].iloc[0]
+                                break
         except:
             pass
 
-        # Fallback: try info dict for earnings date
+        # Method 2: earnings_dates property
         if earnings_date is None:
-            for key in ['earningsTimestamp', 'mostRecentQuarter']:
+            try:
+                ed = stock.earnings_dates
+                if ed is not None and len(ed) > 0:
+                    # Get the next future date, or most recent
+                    future = ed[ed.index >= datetime.now()]
+                    if len(future) > 0:
+                        earnings_date = future.index[-1]  # earliest future date
+                    else:
+                        earnings_date = ed.index[0]  # most recent past
+            except:
+                pass
+
+        # Method 3: info timestamps
+        if earnings_date is None:
+            for key in ['earningsTimestamp', 'earningsTimestampStart']:
                 ts = info.get(key)
                 if ts is not None:
                     try:
                         earnings_date = datetime.fromtimestamp(ts)
-                        days_to_earnings = (earnings_date - datetime.now()).days
                         break
                     except:
                         pass
 
-        # --- Dividend date ---
-        ex_dividend_date = None
-        days_to_dividend = None
-        try:
-            div_ts = info.get('exDividendDate')
-            if div_ts is not None:
-                ex_dividend_date = datetime.fromtimestamp(div_ts)
-                days_to_dividend = (ex_dividend_date - datetime.now()).days
-        except:
-            pass
+        # Clean earnings date to string
+        if earnings_date is not None:
+            try:
+                if isinstance(earnings_date, str):
+                    earnings_date = pd.to_datetime(earnings_date)
+                earnings_date = pd.Timestamp(earnings_date)
+            except:
+                earnings_date = None
 
-        # --- Valuation ---
-        pe_raw = info.get('trailingPE', None)
-        fpe_raw = info.get('forwardPE', None)
+        # --- Ex-dividend date ---
+        ex_dividend_date = None
+        div_ts = info.get('exDividendDate')
+        if div_ts is not None:
+            try:
+                ex_dividend_date = pd.Timestamp(datetime.fromtimestamp(div_ts))
+            except:
+                pass
 
         return {
             'pe_ratio': float(pe_raw) if pe_raw is not None else None,
             'forward_pe': float(fpe_raw) if fpe_raw is not None else None,
-            'sector': info.get('sector', 'Unknown'),
-            'industry': info.get('industry', 'Unknown'),
-            'avg_volume': info.get('averageVolume', None),
+            'sector': sector,
+            'industry': industry,
+            'avg_volume': avg_volume,
             'earnings_date': earnings_date,
-            'days_to_earnings': days_to_earnings,
             'ex_dividend_date': ex_dividend_date,
-            'days_to_dividend': days_to_dividend,
         }
     except:
         return {
             'pe_ratio': None, 'forward_pe': None,
             'sector': 'Unknown', 'industry': 'Unknown',
             'avg_volume': None, 'earnings_date': None,
-            'days_to_earnings': None, 'ex_dividend_date': None,
-            'days_to_dividend': None,
+            'ex_dividend_date': None,
         }
 
 
@@ -317,18 +358,20 @@ def analyze_stock(ticker, days_to_simulate=90, num_simulations=10000, historical
         except:
             volume_surge = None
 
-        # Earnings proximity flag (within 20 days?)
-        days_to_earn = fundamentals['days_to_earnings']
-        if days_to_earn is not None and 0 <= days_to_earn <= 20:
-            earnings_soon = True
-        else:
-            earnings_soon = False
-
-        # Earnings inside trade window
-        if days_to_earn is not None and 0 <= days_to_earn <= days_to_simulate:
-            earnings_in_window = True
-        else:
-            earnings_in_window = False
+        # Earnings proximity
+        from datetime import datetime
+        earnings_date = fundamentals['earnings_date']
+        earnings_soon = False
+        earnings_in_window = False
+        if earnings_date is not None:
+            try:
+                days_to_earn = (pd.Timestamp(earnings_date) - pd.Timestamp(datetime.now())).days
+                if 0 <= days_to_earn <= 20:
+                    earnings_soon = True
+                if 0 <= days_to_earn <= days_to_simulate:
+                    earnings_in_window = True
+            except:
+                pass
 
         # Strike prices at key percentiles
         strike_p5 = stock_price * (1 + p5 / 100)
@@ -385,12 +428,10 @@ def analyze_stock(ticker, days_to_simulate=90, num_simulations=10000, historical
             # Earnings
             'earnings_soon': earnings_soon,
             'earnings_in_window': earnings_in_window,
-            'days_to_earnings': fundamentals['days_to_earnings'],
             'earnings_date': fundamentals['earnings_date'],
 
             # Dividend
             'ex_dividend_date': fundamentals['ex_dividend_date'],
-            'days_to_dividend': fundamentals['days_to_dividend'],
 
             # Valuation
             'pe_ratio': fundamentals['pe_ratio'],

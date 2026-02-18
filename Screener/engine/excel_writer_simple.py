@@ -42,13 +42,11 @@ def write_results_to_excel(results, output_path):
         'sector',
         'industry',
 
-        # Earnings & dividend proximity
+        # Earnings & dividend
         'earnings_soon',
         'earnings_in_window',
-        'days_to_earnings',
         'earnings_date',
         'ex_dividend_date',
-        'days_to_dividend',
 
         # Statistical dislocation
         'z_score',
