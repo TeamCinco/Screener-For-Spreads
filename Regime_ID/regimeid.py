@@ -1,7 +1,8 @@
 """
 ETF REGIME ENGINE
-Category-Based (ETF Appropriate)
-Composite Scoring + Visual Dashboard
+Category-Based
+Composite Scoring
+Single Visual Dashboard Output
 """
 
 import yfinance as yf
@@ -25,7 +26,6 @@ SHORT_LOOKBACK = 20
 LONG_LOOKBACK = 100
 TRADING_DAYS = 252
 
-
 # ============================================================
 # OUTPUT FOLDER
 # ============================================================
@@ -37,7 +37,6 @@ def create_output_folder():
     path.mkdir(parents=True, exist_ok=True)
     return path
 
-
 # ============================================================
 # LOAD ETF LIST
 # ============================================================
@@ -45,7 +44,6 @@ def create_output_folder():
 def load_etfs(filepath):
     with open(filepath, "r") as f:
         return [line.strip().upper() for line in f if line.strip()]
-
 
 # ============================================================
 # SAFE PRICE DOWNLOAD
@@ -73,39 +71,26 @@ def safe_download(ticker):
     except:
         return None
 
-
 # ============================================================
-# ETF CATEGORY INFO
+# ETF METADATA
 # ============================================================
 
 def get_etf_metadata(ticker):
-
     try:
         stock = yf.Ticker(ticker)
         info = stock.info or {}
-
-        category = info.get("category")
-        fund_family = info.get("fundFamily")
+        category = info.get("category", "Unknown")
+        fund_family = info.get("fundFamily", "Unknown")
         legal_type = info.get("legalType")
-
-        if not category:
-            category = "Unknown"
-
-        if not fund_family:
-            fund_family = "Unknown"
-
         return category, fund_family, legal_type
-
     except:
         return "Unknown", "Unknown", None
-
 
 # ============================================================
 # REGIME CLASSIFICATION
 # ============================================================
 
 def classify_regime(momentum, vol_ratio):
-
     if momentum > 0 and vol_ratio > 1:
         return "Bull Expansion"
     elif momentum > 0 and vol_ratio <= 1:
@@ -114,7 +99,6 @@ def classify_regime(momentum, vol_ratio):
         return "Bear Expansion"
     else:
         return "Bear Compression"
-
 
 # ============================================================
 # ANALYZE ETF
@@ -153,7 +137,6 @@ def analyze_etf(ticker):
         "long_regime": long_regime
     }
 
-
 # ============================================================
 # COMPOSITE SCORING
 # ============================================================
@@ -177,7 +160,6 @@ def add_composite_scores(df):
 
     return df
 
-
 # ============================================================
 # CATEGORY AGGREGATION
 # ============================================================
@@ -190,67 +172,56 @@ def aggregate_by_category(df):
         avg_short_mom=("short_momentum_%", "mean"),
         avg_long_mom=("long_momentum_%", "mean"),
         bull_expansion_pct=("long_regime",
-                            lambda x: (x=="Bull Expansion").mean()*100),
+                            lambda x: (x == "Bull Expansion").mean() * 100),
         bear_expansion_pct=("long_regime",
-                            lambda x: (x=="Bear Expansion").mean()*100)
+                            lambda x: (x == "Bear Expansion").mean() * 100)
     )
 
     return grouped.sort_values("avg_composite", ascending=False)
 
-
 # ============================================================
-# VISUALS
+# SINGLE DASHBOARD
 # ============================================================
 
-def create_visuals(df, category_df, output_path):
+def create_dashboard(df, category_df, output_path):
 
-    # Regime Distribution
-    plt.figure()
-    df["long_regime"].value_counts().plot(kind="bar")
-    plt.title("Long-Term Regime Distribution")
-    plt.xticks(rotation=45)
-    plt.tight_layout()
-    plt.savefig(output_path / "long_regime.png")
-    plt.close()
+    fig, axes = plt.subplots(2, 2, figsize=(18, 12))
 
-    # Momentum Map
-    plt.figure()
-    plt.scatter(df["short_momentum_%"], df["long_momentum_%"])
-    plt.axhline(0)
-    plt.axvline(0)
-    plt.xlabel("Short Momentum %")
-    plt.ylabel("Long Momentum %")
-    plt.title("Momentum Map")
-    plt.tight_layout()
-    plt.savefig(output_path / "momentum_scatter.png")
-    plt.close()
+    # 1. Long Regime Distribution
+    df["long_regime"].value_counts().plot(
+        kind="bar", ax=axes[0,0]
+    )
+    axes[0,0].set_title("Long-Term Regime Distribution")
+    axes[0,0].tick_params(axis='x', rotation=45)
 
-    # Category Composite Bar
-    plt.figure(figsize=(10,6))
-    category_df["avg_composite"].plot(kind="bar")
-    plt.title("ETF Category Composite Strength")
-    plt.xticks(rotation=45)
-    plt.tight_layout()
-    plt.savefig(output_path / "category_strength.png")
-    plt.close()
+    # 2. Momentum Scatter
+    axes[0,1].scatter(df["short_momentum_%"], df["long_momentum_%"])
+    axes[0,1].axhline(0)
+    axes[0,1].axvline(0)
+    axes[0,1].set_title("Momentum Map")
+    axes[0,1].set_xlabel("Short Momentum %")
+    axes[0,1].set_ylabel("Long Momentum %")
 
-    # Heatmap
-    plt.figure(figsize=(12,6))
+    # 3. Category Composite Strength
+    category_df["avg_composite"].plot(
+        kind="bar", ax=axes[1,0]
+    )
+    axes[1,0].set_title("ETF Category Composite Strength")
+    axes[1,0].tick_params(axis='x', rotation=45)
+
+    # 4. Heatmap
     sns.heatmap(
         category_df[["avg_composite"]].T,
         cmap="RdYlGn",
         center=0,
-        annot=True
+        annot=True,
+        ax=axes[1,1]
     )
-    plt.title("ETF Category Heatmap")
+    axes[1,1].set_title("ETF Category Heatmap")
+
     plt.tight_layout()
-    plt.savefig(output_path / "category_heatmap.png")
+    plt.savefig(output_path / "regime_dashboard.png")
     plt.close()
-
-    alignment = (df["short_regime"] == df["long_regime"]).mean() * 100
-
-    return alignment
-
 
 # ============================================================
 # MAIN
@@ -259,7 +230,7 @@ def create_visuals(df, category_df, output_path):
 def run_regime():
 
     print("\n==============================")
-    print("ETF REGIME ENGINE (CATEGORY)")
+    print("ETF REGIME ENGINE (DASHBOARD)")
     print("==============================")
 
     output_path = create_output_folder()
@@ -289,13 +260,11 @@ def run_regime():
     df.to_csv(output_path / "etf_regime_output.csv", index=False)
     category_df.to_csv(output_path / "category_composite.csv")
 
-    alignment = create_visuals(df, category_df, output_path)
+    create_dashboard(df, category_df, output_path)
 
     print(f"\nAnalyzed ETFs: {len(df)}")
     print(f"Skipped: {skipped}")
-    print(f"Alignment: {round(alignment,2)}%")
     print(f"\nSaved to: {output_path}")
-
 
 if __name__ == "__main__":
     run_regime()
