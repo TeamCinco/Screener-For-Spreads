@@ -1,6 +1,6 @@
 """
-Excel output writer — Deep Value Screener Version
-Crash-proof, clean valuation-focused output
+Excel Writer — Deep Value Screener
+Writes screening results to Excel with multiple tabs.
 """
 
 import pandas as pd
@@ -9,213 +9,100 @@ from pathlib import Path
 
 
 def write_results_to_excel(results, output_path):
-    """Write deep value screener results safely to Excel"""
+    """Save screener results to Excel with filtered tabs."""
 
-    # =====================================================
-    # Ensure directory exists
-    # =====================================================
-
-    output_dir = Path(output_path).parent
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    # =====================================================
-    # Validate results
-    # =====================================================
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
     if not results:
-        print("No results provided")
+        print("No results to save.")
         return
 
     df = pd.DataFrame(results)
 
-    # Keep only successful results
-    if 'success' in df.columns:
-        df = df[df['success'] == True].copy()
+    # Keep only successful pulls
+    if "success" in df.columns:
+        df = df[df["success"] == True].copy()
 
     if df.empty:
-        print("No successful results to save")
+        print("No successful results to save.")
         return
 
-    # =====================================================
-    # GLOBAL SANITATION
-    # =====================================================
-
+    # Clean infinities
     df = df.replace([np.inf, -np.inf], np.nan)
 
-    # Ensure required structural columns exist
-    required_cols = ['ticker', 'sector', 'industry', 'signal']
+    # Fill missing labels
+    df["ticker"] = df["ticker"].fillna("UNKNOWN")
+    df["sector"] = df["sector"].fillna("Unknown")
+    df["industry"] = df["industry"].fillna("Unknown")
+    df["signal"] = df["signal"].fillna("NEUTRAL")
 
-    for col in required_cols:
-        if col not in df.columns:
-            df[col] = "Unknown"
-
-    df['ticker'] = df['ticker'].fillna("UNKNOWN")
-    df['sector'] = df['sector'].fillna("Unknown")
-    df['industry'] = df['industry'].fillna("Unknown")
-    df['signal'] = df['signal'].fillna("NEUTRAL")
-
-    # =====================================================
-    # NUMERIC CONVERSION (VALUATION METRICS)
-    # =====================================================
-
+    # Convert numerics
     numeric_cols = [
-
-        'current_price',
-        'market_cap',
-
-        'fcf',
-        'fcf_yield_%',
-
-        'ev_ebitda',
-        'net_debt_ebitda',
-
-        'earnings_yield_%',
-
-        'intrinsic_value',
-        'intrinsic_value_per_share',
-        'margin_of_safety_%',
-
-        'deep_value_score',
-
-        'pe_ratio',
-        'forward_pe',
-        'pe_recovery_ratio',
-
-        'avg_volume'
+        "current_price", "market_cap",
+        "fcf", "fcf_yield_%",
+        "ev_ebitda", "net_debt_ebitda", "fcf_to_debt",
+        "earnings_yield_%",
+        "deep_value_score",
+        "pe_ratio", "forward_pe", "pe_recovery_ratio",
+        "avg_volume",
     ]
-
     for col in numeric_cols:
         if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors='coerce')
+            df[col] = pd.to_numeric(df[col], errors="coerce")
 
-    # =====================================================
-    # SORT BY DEEP VALUE SCORE (MOST IMPORTANT FIRST)
-    # =====================================================
+    # Sort by score — best candidates first
+    if "deep_value_score" in df.columns:
+        df = df.sort_values("deep_value_score", ascending=False)
 
-    if 'deep_value_score' in df.columns:
-        df = df.sort_values(
-            by='deep_value_score',
-            ascending=False
-        )
-
-    # =====================================================
-    # CLEAN COLUMN ORDER (VALUATION PRIORITY ORDER)
-    # =====================================================
-
+    # Column order for output
     column_order = [
-
         # Identity
-        'ticker',
-        'signal',
-        'sector',
-        'industry',
-
-        # Price context
-        'current_price',
-        'market_cap',
-
-        # Core valuation metrics
-        'fcf',
-        'fcf_yield_%',
-
-        'ev_ebitda',
-        'net_debt_ebitda',
-
-        'earnings_yield_%',
-
-        # Intrinsic value calculations
-        'intrinsic_value_per_share',
-        'intrinsic_value',
-        'margin_of_safety_%',
-
-        # Composite scoring
-        'deep_value_score',
-        'high_conviction',
-
-        # Supporting metrics
-        'pe_ratio',
-        'forward_pe',
-        'pe_recovery_ratio',
-
+        "ticker", "signal", "sector", "industry",
+        # Price
+        "current_price", "market_cap",
+        # Core value metrics
+        "fcf", "fcf_yield_%",
+        "ev_ebitda", "net_debt_ebitda", "fcf_to_debt",
+        "earnings_yield_%",
+        # Score
+        "deep_value_score", "high_conviction",
+        # Supporting
+        "pe_ratio", "forward_pe", "pe_recovery_ratio",
         # Liquidity
-        'avg_volume'
+        "avg_volume",
+        # Calendar
+        "earnings_date", "ex_dividend_date",
     ]
 
-    available_cols = [col for col in column_order if col in df.columns]
+    available = [c for c in column_order if c in df.columns]
+    df_out = df[available].copy().round(4)
 
-    df_out = df[available_cols].copy()
-
-    # Round for readability
-    df_out = df_out.round(4)
-
-    # =====================================================
-    # WRITE TO EXCEL SAFELY
-    # =====================================================
-
+    # Write
     try:
+        with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
 
-        with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
+            df_out.to_excel(writer, index=False, sheet_name="All Results")
 
-            # Main results
-            df_out.to_excel(
-                writer,
-                index=False,
-                sheet_name='All Results'
-            )
+            # High conviction tab
+            if "high_conviction" in df_out.columns:
+                hc = df_out[df_out["high_conviction"] == True]
+                if not hc.empty:
+                    hc.to_excel(writer, index=False, sheet_name="High Conviction")
 
-            # High conviction subset
-            if 'high_conviction' in df_out.columns:
+            # Deep value tab
+            dv = df_out[df_out["signal"] == "DEEP_VALUE"]
+            if not dv.empty:
+                dv.to_excel(writer, index=False, sheet_name="Deep Value")
 
-                high_conviction = df_out[
-                    df_out['high_conviction'] == True
-                ]
-
-                if not high_conviction.empty:
-
-                    high_conviction.to_excel(
-                        writer,
-                        index=False,
-                        sheet_name='High Conviction'
-                    )
-
-            # Deep value subset
-            deep_value = df_out[
-                df_out['signal'] == 'DEEP_VALUE'
-            ]
-
-            if not deep_value.empty:
-
-                deep_value.to_excel(
-                    writer,
-                    index=False,
-                    sheet_name='Deep Value'
-                )
-
-        print(f"\nResults saved to: {output_path}")
-        print(f"Total companies: {len(df_out)}")
-
-        if 'high_conviction' in df_out.columns:
-            print(
-                f"High conviction: "
-                f"{df_out['high_conviction'].fillna(False).sum()}"
-            )
-
-        if 'signal' in df_out.columns:
-            print(
-                f"Deep value: "
-                f"{(df_out['signal'] == 'DEEP_VALUE').sum()}"
-            )
+        print(f"\nSaved to: {output_path}")
+        print(f"Total: {len(df_out)}")
+        if "high_conviction" in df_out.columns:
+            print(f"High conviction: {df_out['high_conviction'].fillna(False).sum()}")
+        if "signal" in df_out.columns:
+            print(f"Deep value: {(df_out['signal'] == 'DEEP_VALUE').sum()}")
 
     except Exception as e:
-
-        print("Excel write failed — saving backup")
-
-        backup_path = str(output_path).replace(
-            ".xlsx",
-            "_BACKUP.xlsx"
-        )
-
-        df_out.to_excel(backup_path, index=False)
-
-        print(f"Backup saved to: {backup_path}")
-        print("Error:", str(e))
+        backup = str(output_path).replace(".xlsx", "_BACKUP.xlsx")
+        df_out.to_excel(backup, index=False)
+        print(f"Excel write failed. Backup saved to: {backup}")
+        print(f"Error: {e}")
