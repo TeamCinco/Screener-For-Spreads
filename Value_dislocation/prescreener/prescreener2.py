@@ -1,8 +1,6 @@
 """
-This screener may be a little 
-to expensive and not fast at all, but well see. 
-Structural filter only.
-Everything heavy stays in main screener.
+ULTRA PRESCREENER - Quality + Dislocation
+Cuts 12k → 1k–3k intelligently before heavy analysis
 """
 
 import yfinance as yf
@@ -10,6 +8,7 @@ import pandas as pd
 import json
 from pathlib import Path
 import math
+import numpy as np
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -22,9 +21,9 @@ OUTPUT_TICKERS = "/Users/jazzhashzzz/Desktop/Screener For Spreads/ticker_filtere
 
 BATCH_SIZE = 100
 MIN_PRICE = 5
-MIN_AVG_VOL = 4_000_000
-MIN_DRAWDOWN = -4
-MIN_CURRENT_RATIO = 0.8
+MIN_AVG_VOL = 800_000
+MIN_DRAWDOWN = -8    # Require at least 15% below 1Y high
+LOOKBACK_DAYS = 252    # 1 year lookback
 
 # ============================================================
 # LOAD TICKERS
@@ -36,57 +35,47 @@ def load_tickers_from_json(path):
 
     tickers = []
     for key in data:
-        ticker = data[key].get("ticker")
-        if ticker:
-            tickers.append(ticker.strip().upper())
+        if 'ticker' in data[key]:
+            ticker = data[key]['ticker'].strip().upper()
+            tickers.append(ticker)
 
-    return list(set(tickers))
-
+    return tickers
 
 def chunk(lst, n):
     for i in range(0, len(lst), n):
         yield lst[i:i + n]
 
 # ============================================================
-# LIGHT FUNDAMENTAL FILTER (Moved from main screener)
+# LIGHT FUNDAMENTAL FILTER
 # ============================================================
 
-def structural_fundamental_gate(ticker):
+def quick_fundamental_check(ticker):
+    """
+    Lightweight quality gate.
+    Avoid deep calls — just eliminate obvious junk.
+    """
     try:
         stock = yf.Ticker(ticker)
-        info = stock.info or {}
+        info = stock.fast_info  # much faster than full .info
 
-        pe = info.get("trailingPE")
-        revenue_growth = info.get("revenueGrowth")
+        # fallback if needed
+        if info is None:
+            return False
 
-        # Must be profitable
+        # basic profitability proxy
+        pe = stock.info.get("trailingPE", None)
+        revenue_growth = stock.info.get("revenueGrowth", None)
+
         if pe is None or pe <= 0:
             return False
 
-        # Avoid severe revenue collapse
-        if revenue_growth is not None and revenue_growth < -0.25:
+        if revenue_growth is not None and revenue_growth < -0.15:
             return False
-
-        # Basic liquidity sanity
-        try:
-            balance = stock.balance_sheet
-            if balance is not None and not balance.empty:
-
-                current_assets = balance.loc["Total Current Assets"].iloc[0]
-                current_liabilities = balance.loc["Total Current Liabilities"].iloc[0]
-
-                if current_liabilities and current_liabilities != 0:
-                    current_ratio = current_assets / current_liabilities
-                    if current_ratio < MIN_CURRENT_RATIO:
-                        return False
-        except:
-            pass
 
         return True
 
     except:
         return False
-
 
 # ============================================================
 # MAIN
@@ -94,9 +83,9 @@ def structural_fundamental_gate(ticker):
 
 def main():
 
-    print("\n" + "="*60)
-    print("ULTRA PRESCREENER")
-    print("="*60)
+    print("\n" + "=" * 60)
+    print("CAPITAL-READY PRESCREENER")
+    print("=" * 60)
 
     tickers = load_tickers_from_json(INPUT_JSON)
     print(f"\nLoaded {len(tickers):,} tickers")
@@ -105,11 +94,10 @@ def main():
     passed_final = []
 
     total_batches = math.ceil(len(tickers) / BATCH_SIZE)
-
     print(f"\nProcessing {total_batches} batches...")
 
     # --------------------------------------------------------
-    # STEP 1: BULK PRICE FILTER
+    # STEP 1: BULK PRICE + LIQUIDITY + DRAWDOWN
     # --------------------------------------------------------
 
     for i, batch in enumerate(chunk(tickers, BATCH_SIZE), 1):
@@ -126,20 +114,25 @@ def main():
                 progress=False
             )
         except:
-            print("✗")
+            print("✗ Download failed")
             continue
 
         batch_passed = 0
 
         for ticker in batch:
             try:
-                df = data if len(batch) == 1 else data[ticker]
+                if len(batch) == 1:
+                    df = data
+                else:
+                    df = data[ticker]
 
                 if len(df) < 60:
                     continue
 
                 price = df["Close"].iloc[-1]
                 avg_vol = df["Volume"].mean()
+
+                # 1Y high drawdown
                 high_1y = df["Close"].max()
                 drawdown = (price - high_1y) / high_1y * 100
 
@@ -156,39 +149,44 @@ def main():
 
         print(f"✓ {batch_passed}")
 
-    print(f"\nAfter structural price filter: {len(passed_price):,}")
+    print(f"\nAfter price/dislocation filter: {len(passed_price):,}")
 
     # --------------------------------------------------------
-    # STEP 2: STRUCTURAL FUNDAMENTAL FILTER
+    # STEP 2: LIGHT FUNDAMENTAL GATE
     # --------------------------------------------------------
 
-    print("\nRunning structural fundamental filter...")
+    print("\nRunning light fundamental checks...")
 
     for i, ticker in enumerate(passed_price, 1):
-        print(f"[{i}/{len(passed_price)}] {ticker}", end=" ")
+        print(f"[{i}/{len(passed_price)}] {ticker}", end=" ", flush=True)
 
-        if structural_fundamental_gate(ticker):
+        if quick_fundamental_check(ticker):
             passed_final.append(ticker)
             print("✓")
         else:
             print("✗")
 
-    # Save output
+    # --------------------------------------------------------
+    # SAVE OUTPUT
+    # --------------------------------------------------------
+
     Path(OUTPUT_TICKERS).parent.mkdir(parents=True, exist_ok=True)
 
     with open(OUTPUT_TICKERS, "w") as f:
         for t in passed_final:
             f.write(f"{t}\n")
 
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("RESULTS")
-    print("="*60)
+    print("=" * 60)
     print(f"Initial universe: {len(tickers):,}")
-    print(f"After structural filter: {len(passed_final):,}")
+    print(f"After price + drawdown: {len(passed_price):,}")
+    print(f"After quality gate: {len(passed_final):,}")
     print(f"Reduction: {(1 - len(passed_final)/len(tickers))*100:.1f}%")
     print(f"\nSaved to: {OUTPUT_TICKERS}")
-    print("="*60)
+    print("=" * 60)
 
+# ============================================================
 
 if __name__ == "__main__":
     main()

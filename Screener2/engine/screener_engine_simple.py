@@ -166,7 +166,7 @@ def get_fundamentals_extended(ticker):
 # ANALYZE STOCK
 # ============================================================
 
-def analyze_stock(ticker, days_to_simulate=90, num_simulations=5000, historical_window=252*3):
+def analyze_stock(ticker, days_to_simulate=90, num_simulations=5000, historical_window=252):
 
     try:
 

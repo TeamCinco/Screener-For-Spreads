@@ -25,7 +25,7 @@ OUTPUT_FILE = "/Users/jazzhashzzz/Desktop/Screener For Spreads/output/screener_r
 
 DAYS_TO_SIMULATE = 90
 NUM_SIMULATIONS = 5000
-HISTORICAL_WINDOW = 252 * 3
+HISTORICAL_WINDOW = 252
 
 RESULTS = []
 
