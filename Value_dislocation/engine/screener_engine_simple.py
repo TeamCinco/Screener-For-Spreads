@@ -284,8 +284,6 @@ def analyze_stock(ticker, **kwargs):
 
         high_conviction = (
             score >= 8
-            and avg_volume is not None
-            and avg_volume > 500_000
             and not earnings_within_14_days
         )
 
