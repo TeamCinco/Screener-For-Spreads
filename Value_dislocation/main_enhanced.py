@@ -27,6 +27,13 @@ from engine.excel_writer_simple import write_results_to_excel
 
 TICKER_FILE = "/Users/jazzhashzzz/Desktop/Screener For Spreads/ticker_filtered.txt"
 OUTPUT_FILE = "/Users/jazzhashzzz/Desktop/Screener For Spreads/output/screener_results.xlsx"
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = BASE_DIR.parent
+
+TICKER_FILE = PROJECT_ROOT / "ticker_filtered.txt"
+OUTPUT_FILE = BASE_DIR / "screener_results.xlsx"
 
 AUTOSAVE_EVERY = 25       # Save progress every N tickers
 DELAY_SECONDS = 0.15      # Pause between API calls to avoid rate limits
