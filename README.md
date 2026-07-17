@@ -1,110 +1,120 @@
-# Capital Deployment Framework
+# Deep Value Screener
 
-Systematic stock screening + ETF regime identification engine.
+A fundamentals-based stock screener that reduces a large ticker universe down to a
+ranked shortlist of statistically cheap, financially healthy names.
 
-This project is designed to:
-
-1. Reduce a large universe of tickers to high-quality candidates
-2. Evaluate statistical dislocations using Monte Carlo simulation
-3. Identify broader market regimes using ETF category data
-
-The goal is disciplined capital deployment — not hype chasing.
-
----
-
-## Structure
-
-### 1️⃣ Prescreener
-
-Fast bulk filter that reduces ~10k+ tickers down to a manageable list.
-
-Filters include:
-
-* Minimum price
-* Minimum liquidity
-* 1-year drawdown requirement
-* Basic quality gate (profitability proxy)
-
-Output:
+The pipeline is a two-stage funnel:
 
 ```
-ticker_filtered.txt
+ticker.json  ──(prescreener)──▶  ticker_filtered.txt  ──(main_enhanced)──▶  screener_results.xlsx
+   ~10k+                            liquid / profitable                        scored & ranked
+   symbols                          survivors                                  candidates
 ```
 
-This becomes the input for the main screener.
+All work lives in `Value_dislocation/`.
 
 ---
 
-### 2️⃣ Screener Engine
+## Stage 1 — Prescreener
 
-Deep analysis layer.
+`Value_dislocation/prescreener/` — a fast structural filter that trims the full SEC
+ticker universe (`ticker.json`) down to a manageable list.
 
-For each stock:
+Gates applied:
 
-* Monte Carlo simulation (fat tails + volatility clustering)
-* Distribution percentiles (p5, p10, p50)
-* CVaR tail risk metrics
-* Z-score mean reversion signal
-* Revenue growth (YoY + multi-year CAGR)
-* Liquidity metrics (current ratio + cash reserves)
-* Earnings & dividend dates
+* **Price** ≥ $5
+* **Liquidity** — average volume ≥ 4M shares/day
+* **Drawdown** — meaningful pullback from the 1-year high
+* **Profitability** — trailing P/E must be positive
+* **Revenue** — reject severe revenue collapse (worse than −25% YoY)
+* **Balance sheet** — current ratio ≥ 0.8
 
-Output:
-
-* CSV / Excel file with full metrics
-* Used for long-term capital deployment decisions
+Output: **`ticker_filtered.txt`** (tab-separated `ticker<TAB>volume`), the input to
+Stage 2.
 
 ---
 
-### 3️⃣ ETF Regime Engine
+## Stage 2 — `main_enhanced.py`
 
-Macro context layer.
+`Value_dislocation/main_enhanced.py` is the main controller. It loads the filtered
+tickers and runs the deep-value engine over each one, pulling fundamentals live from
+Yahoo Finance (`yfinance`).
 
-Uses ETF data to:
+### What it computes per stock
 
-* Classify short-term and long-term regimes
-* Identify momentum + volatility expansion/compression
-* Group ETFs by Yahoo Finance category
-* Compute composite category regime scores
-* Generate visual dashboards
+For every ticker, `engine/screener_engine_simple.py`:
 
-Outputs:
+1. Pulls fundamentals (price, market cap, sector, P/E, forward P/E, EV, EBITDA, debt,
+   cash, shares, average volume).
+2. Looks up the **next earnings date** (3 fallback methods) and the **ex-dividend date**.
+3. Derives five core value metrics:
 
-* CSV file
-* Heatmaps
-* Regime distributions
-* Momentum scatter plots
-* Composite category rankings
+   | Metric | Meaning | Cheaper when |
+   |---|---|---|
+   | **FCF Yield %** | Free cash flow ÷ market cap | Higher |
+   | **EV / EBITDA** | Enterprise value ÷ operating earnings | Lower |
+   | **Earnings Yield %** | Inverse of P/E | Higher |
+   | **Net Debt / EBITDA** | Leverage vs. earnings | Lower |
+   | **FCF-to-Debt** | Ability to pay down debt from cash flow | Higher |
 
-This provides macro awareness before deploying capital.
+   > Financials (`Financial Services`) are excluded from FCF math — bank cash flow
+   > isn't comparable to operating businesses.
+
+### Scoring & signals
+
+Each metric scores 0, 1, or 2 against fixed thresholds → a **0–10 deep-value score**.
+
+| Signal | Rule |
+|---|---|
+| `DEEP_VALUE` | score ≥ 8 — cheap on nearly every metric |
+| `VALUE` | score ≥ 5 — cheap on several metrics |
+| `NEUTRAL` | score < 5 — not obviously cheap |
+
+**High conviction** flag = `DEEP_VALUE` **and** no earnings report within the next
+14 days — i.e. names you could actually deploy into today without walking into a
+binary earnings event.
+
+### Output
+
+`engine/excel_writer_simple.py` writes **`screener_results.xlsx`**, sorted best-first,
+with three tabs:
+
+* **All Results** — every successfully screened stock with full metrics
+* **High Conviction** — the high-conviction subset
+* **Deep Value** — all `DEEP_VALUE` names
+
+### Reliability
+
+* **Autosave** every 25 tickers, so a crash or rate-limit never loses progress.
+* **Ctrl+C** finishes the current ticker, saves, then exits cleanly.
+* A throttle delay between calls avoids Yahoo rate limits.
 
 ---
 
-## Philosophy
+## How to run
 
-This framework is built around:
+```bash
+# 1. (optional) rebuild the filtered universe
+python Value_dislocation/prescreener/prescreener3.py
 
-* Statistical discipline
-* Risk awareness
-* Macro alignment
-* Capital preservation first
+# 2. run the screener
+python Value_dislocation/main_enhanced.py
+#    → writes Value_dislocation/screener_results.xlsx
+#    → Ctrl+C any time; progress is autosaved
+```
 
-It is not a prediction engine.
-It is a structured decision-support system.
+Paths are resolved relative to the repo root, so `ticker_filtered.txt` (input) and
+`screener_results.xlsx` (output) are picked up automatically.
 
----
-
-## How to Use
-
-1. Run the Prescreener
-2. Run the Screener on filtered tickers
-3. Run ETF Regime Engine for macro context
-4. Deploy capital selectively after research
+Dependencies: see `requirements.txt` (`yfinance`, `pandas`, `numpy`, `openpyxl`).
 
 ---
 
-## Disclaimer
+## What this is — and isn't
 
-This project is for research and educational purposes only.
-It does not constitute financial advice.
+This is a **screening tool**. It flags statistically cheap, liquid, financially sound
+candidates for deeper human research. It does **not** compute intrinsic value — that
+requires a per-company DCF with company-specific assumptions. The score is for
+**ranking**, not for making buy decisions.
 
+For research and educational purposes only. Not financial advice.
